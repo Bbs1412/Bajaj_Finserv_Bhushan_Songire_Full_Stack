@@ -1,11 +1,15 @@
 import os
 import re
+
 import pytz
-import uvicorn
+from datetime import datetime
+
+from pydantic import BaseModel
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from datetime import datetime
+from fastapi.exceptions import RequestValidationError
+
+import uvicorn
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -106,12 +110,50 @@ RATE_LIMIT = "10000/hour"
 
 
 # --------------------------------------------------------------------------------
-# FastAPI + Limiter
+# FastAPI + Limiter + Exception Handlers
 # --------------------------------------------------------------------------------
 
 limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="BFHL FastAPI Server")
 app.state.limiter = limiter
+
+
+@app.exception_handler(404)
+@limiter.limit(RATE_LIMIT)
+async def not_found_handler(request: Request, exc):
+    """Custom 404 handler with rate limiting"""
+    return JSONResponse(
+        status_code=404,
+        content={
+            "is_success": False,
+            "message": "Resource not found"
+        }
+    )
+
+
+@app.exception_handler(RequestValidationError)
+@limiter.limit(RATE_LIMIT)
+async def validation_exception_handler(request: Request, exc):
+    """Custom validation error handler with rate limiting"""
+    return JSONResponse(
+        status_code=422,
+        content={
+            "is_success": False,
+            "message": "Request validation error"
+        }
+    )
+
+
+@app.exception_handler(500)
+async def internal_error_handler(request, exc):
+    """Custom 500 handler to hide internal details"""
+    return JSONResponse(
+        status_code=500,
+        content={
+            "is_success": False,
+            "error": "Internal server error"
+        }
+    )
 
 
 # --------------------------------------------------------------------------------
@@ -127,7 +169,8 @@ class DataRequest(BaseModel):
 # --------------------------------------------------------------------------------
 
 @app.get("/")
-async def root():
+@limiter.limit(RATE_LIMIT)
+async def root(request: Request):
     """Root endpoint that returns a hello message and current timestamp in IST
 
     Returns:
@@ -165,13 +208,15 @@ async def bfhl(request: Request, payload: DataRequest):
             "roll_number": ROLL_NUMBER,
             **result
         }
+
         return JSONResponse(content=response, status_code=200)
+
     except Exception as e:
+        # Don't reveal internal error details
         return JSONResponse(
             content={
                 "is_success": False,
                 "error": "Internal server error",
-                "details": str(e),
                 "user_id": build_user_id(FULL_NAME, DOB)
             },
             status_code=500
