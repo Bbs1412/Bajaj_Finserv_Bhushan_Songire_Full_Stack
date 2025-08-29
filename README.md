@@ -30,3 +30,15 @@
     http://localhost:8000
     ```
 
+
+# Testing:
+
+1. To run tests, use the command:
+    ```powershell
+    pytest -v test_main.py
+    ```
+
+1. To see detailed output, use:
+    ```powershell
+    pytest -v -s test_main.py
+    ```
